@@ -1,295 +1,258 @@
+###############
+# Dependencies
+###############
+using FFTW
+using CUDA
+
+################
+# Public exports
+################
 export FT, FT_GPU, iFT, iFT_GPU, MSD, MSD_GPU
-
-function FT(t::Vector{T}, x::Union{Vector{T},Vector{Complex{T}}}, dt_dk_tolerance::T=1.0e-8,indvar::Bool=true) where T
-
-    """
-    Discrete fast Fourier transform.
-
-    Takes the time series `t` and the function values `x` as arguments.
-    By default, returns the FT and the frequency: setting `indvar=false` means the function returns only the FT.
-    """
-    a, b = minimum(t), maximum(t)
-    dt = (t[end] - t[1]) / (length(t) - 1)  # timestep
-    
-    # Check if the time series is equally spaced
-    if any(abs.(diff(t) .- dt) .> dt_dk_tolerance)
-        error("Time series not equally spaced!")
-    end
-
-    N = length(t)
-    # Calculate frequency values for FT
-    k = fftshift(fftfreq(N, 1 ./ dt) .* 2 .* π)
-    # Calculate FT of data
-    xf = fftshift(fft(x))
-    xf2 = xf .* (b - a) / N .* exp.(-1im .* k .* a)
-
-    if indvar
-        return collect(k), collect(xf2)
-    else
-        return collect(xf2)
-    end
-end
-
-function FT_GPU(t::Vector{T}, x::Union{Vector{T},Vector{Complex{T}}}, dt_dk_tolerance::T=1.0e-8,indvar::Bool=true) where T
-    """
-    Discrete fast Fourier transform performed on GPU.
-
-    Takes the time series `t` and the function values `x` as arguments.
-    By default, returns the FT and the frequency: setting `indvar=false` means the function returns only the FT.
-    """
-    
-    a, b = minimum(t), maximum(t)
-    dt = (t[end] - t[1]) / (length(t) - 1)  # timestep
-
-    # Check if the time series is equally spaced
-    if any(abs.(diff(t) .- dt) .> dt_dk_tolerance)
-        error("Time series not equally spaced!")
-    end
-
-    # Transfer data to GPU
-    t_gpu = CuArray(t)
-    x_gpu = CuArray(x)
-
-    N = length(t_gpu)
-    # Calculate frequency values for FT
-    k = fftshift(fftfreq(N, 1 ./ dt) .* 2 .* π)
-    # Calculate FT of data
-    xf = fftshift(fft(x_gpu))
-    xf2 = xf .* (b - a) / N .* exp.(-1im .* k .* a)
-
-    if indvar
-        return collect(k), collect(xf2)  # Convert back to CPU arrays for return
-    else
-        return collect(xf2)
-    end
-end
-
-function iFT(k::Vector{T}, xf::Union{Vector{T},Vector{Complex{T}}}, dt_dk_tolerance::T=1.0e-8, indvar::Bool=true) where T
-    """
-    Inverse discrete fast Fourier transform.
-
-    Takes the frequency series `k` and the function values `xf` as arguments.
-    By default, returns the iFT and the time series; setting `indvar=false` means the function returns only the iFT.
-    """
-    dk = (k[end] - k[1]) / (length(k) - 1)  # timestep
-    
-    # Check if the frequency series is equally spaced
-    if any(abs.(diff(k) .- dk) .> dt_dk_tolerance)
-        error("Frequency series not equally spaced!")
-    end
-
-    N = length(k)
-    x = ifftshift(ifft(xf))
-    t = ifftshift(fftfreq(N, 1 ./ dk)) * 2 * π
-    if N % 2 == 0
-        x .*= exp.(-1im .* t .* N .* dk / 2) .* N .* dk / (2 * π)
-    else
-        x .*= exp.(-1im .* t .* (N - 1) .* dk / 2) .* N .* dk / (2 * π)
-    end
-
-    if indvar
-        return collect(t), x
-    else
-        return x
-    end
-end
-
-function iFT_GPU(k::Vector{T}, xf::Union{Vector{T},Vector{Complex{T}}}, dt_dk_tolerance::T=1.0e-8, indvar::Bool=true) where T
-    """
-    Inverse discrete fast Fourier transform performed on GPU.
-
-    Takes the frequency series `k` and the function values `xf` as arguments.
-    By default, returns the iFT and the time series; setting `indvar=false` means the function returns only the iFT.
-    """
-   
-    
-    dk = (k[end] - k[1]) / (length(k) - 1)  # timestep
-    
-    # Check if the frequency series is equally spaced
-    if any(abs.(diff(k) .- dk) .> dt_dk_tolerance)
-        error("Frequency series not equally spaced!")
-    end
-
-    # Transfer data to GPU
-    k_gpu = CuArray(k)
-    xf_gpu = CuArray(xf)
-
-    N = length(k_gpu)
-    x = ifftshift(ifft(xf_gpu))
-    t = ifftshift(fftfreq(N, 1 ./ dk)) * 2 * π
-    t_gpu = CuArray(t)
-
-    if N % 2 == 0
-        x .*= exp.(-1im .* t_gpu .* N .* dk ./ 2) .* N .* dk ./ (2 * π)
-    else
-        x .*= exp.(-1im .* t_gpu .* (N - 1) .* dk ./ 2) .* N .* dk ./ (2 * π)
-    end
-
-    if indvar
-        return collect(t_gpu), collect(x)  # Convert back to CPU arrays for return
-    else
-        return collect(x)
-    end
-end
-
-
-
-
-
-function Correlation(a::Vector{T}, b::Vector{T}=a, subtract_mean::Bool=false) where T
-    """
-    Calculate correlation or autocorrelation using fast Fourier transforms.
-
-    If two arrays are given, calculates the correlation; if one array is given, calculates the autocorrelation.
-    Setting `subtract_mean=true` causes the mean to be subtracted from the input data.
-    """
-    meana = subtract_mean ? mean(a) : zero(T)
-    N = length(a)
-    next_pow2 = 2 ^ nextpow(2, N)
-    a2 = [a .- meana; zeros(T, next_pow2 - N)]
-    data_a = [a2; zeros(T, length(a2))]
-
-    fra = fft(data_a)
-
-    if b === a
-        sf = conj(fra) .* fra
-    else
-        meanb = subtract_mean ? mean(b) : zero(T)
-        b2 = [b .- meanb; zeros(T, next_pow2 - length(b))]
-        data_b = [b2; zeros(T, length(b2))]
-        frb = fft(data_b)
-        sf = conj(fra) .* frb
-    end
-
-    cor = real(ifft(sf))[1:N] ./ (N:-1:1)
-    return cor
-end
-function MSD_GPU(positions::Vector{T}) where T 
-    corr = Correlation_GPU(positions)
-    return println(length(corr))
-end
-
-function MSD(positions::Vector{T}) where T 
-    corr = Correlation(positions)
-    # 2 .* (corr[1] .- corr[:])
-    return println(length(corr))
-end
-
-function Correlation_GPU(a::Vector{T}, b::Vector{T}=a, subtract_mean::Bool=false) where T
-    """
-    Calculate correlation or autocorrelation using fast Fourier transforms on GPU.
-
-    If two arrays are given, calculates the correlation; if one array is given, calculates the autocorrelation.
-    Setting `subtract_mean=true` causes the mean to be subtracted from the input data.
-    """
-    meana = subtract_mean ? mean(a) : zero(T)
-    N = length(a)
-    next_pow2 = 2 ^ nextpow(2, N)
-    a2 = [a .- meana; zeros(T, next_pow2 - N)]
-    data_a = [a2; zeros(T, length(a2))]
-
-    data_a_gpu = CuArray(data_a)
-    fra = fft(data_a_gpu)
-
-    if b === a
-        sf = conj(fra) .* fra
-    else
-        meanb = subtract_mean ? mean(b) : zero(T)
-        b2 = [b .- meanb; zeros(T, next_pow2 - length(b))]
-        data_b = [b2; zeros(T, length(b2))]
-        data_b_gpu = CuArray(data_b)
-        frb = fft(data_b_gpu)
-        sf = conj(fra) .* frb
-    end
-
-    isf_gpu = ifft(sf)
-    cor = real(Array(isf_gpu))[1:N] ./ (N:-1:1)
-    return collect(cor)  # Move the result back to CPU
-end
-
+export Correlation, Correlation_GPU
 export apply_taper!, apply_taper2!
+export correlation, correlation_GPU
+export pad_to_power_of_two
 
-function apply_taper!(data, taper_start, taper_end)
-    for i in taper_start:taper_end
+########################
+# Utility / helper stuff
+########################
+
+# Pad to next power of two (≥ length(x)); subtract mean if provided
+function pad_to_power_of_two(x::AbstractVector{T}, meanval::T) where {T}
+    n = length(x)
+    m = nextpow(2, n)                   # smallest power of 2 ≥ n
+    y = Vector{T}(undef, m)
+    @inbounds begin
+        @views y[1:n] .= x .- meanval
+        @views y[n+1:m] .= zero(T)
+    end
+    return y
+end
+
+# Hann-like half-window on [taper_start, taper_end]
+function apply_taper!(data, taper_start::Integer, taper_end::Integer)
+    @inbounds for i in taper_start:taper_end
         data[i] *= 0.5 * (1 - cos(π * (i - taper_start) / (taper_end - taper_start)))
     end
+    return nothing
 end
 
-function apply_taper2!(data, taper_start, taper_end)
-    for i in taper_start:taper_end
+# Cosine half-window variant
+function apply_taper2!(data, taper_start::Integer, taper_end::Integer)
+    @inbounds for i in taper_start:taper_end
         data[i] *= cos(π * (i - taper_start) / (2 * (taper_end - taper_start)))
     end
     return nothing
 end
-	
 
-export correlation
+############################
+# Fourier transform routines
+############################
 
-function correlation(a::Vector{T}, b::Vector{T} = a; subtract_mean::Bool=false) where T
-    
-    function pad_to_power_of_two(x, subtract_mean_val)
-        n = length(x)
-        next_power_of_two = 2^ceil(Int, log2(n))
-        padded_length = next_power_of_two - n
-        append!(x .- subtract_mean_val, zeros(padded_length))
+"""
+    FT(t, x; tol=1e-8, indvar=true)
+
+Discrete FT returning angular frequencies `ω` and spectrum `X(ω)` on a uniformly spaced time grid `t`.
+Scaling is such that `X = dt * FFT(x)` (up to fftshift), with an origin correction so you can use `iFT(...; t0=t[1])` to invert exactly.
+"""
+function FT(t::AbstractVector{T}, x::AbstractVector{<:Number}, tol::Real=1e-8, indvar::Bool=true) where {T<:Real}
+    N = length(t)
+    @assert length(x) == N "t and x must have the same length"
+    @assert N ≥ 2 "Need at least 2 samples"
+
+    dt = (t[end] - t[1]) / (N - 1)
+    # uniform grid check
+    if any(abs.(diff(t) .- dt) .> tol)
+        error("Time series not equally spaced!")
     end
 
-    meana = subtract_mean ? mean(a) : 0.0
+    ω = FFTW.fftshift(2π .* FFTW.fftfreq(N, dt))          # angular frequencies
+    X = FFTW.fftshift(fft(x)) .* dt .* exp.(-im .* ω .* t[1])  # dt scaling + origin phase
+
+    return indvar ? (collect(ω), collect(X)) : collect(X)
+end
+
+"""
+    FT_GPU(t, x; tol=1e-8, indvar=true)
+
+GPU version of `FT`. Only the FFT itself runs on the GPU; results are returned on the CPU.
+"""
+function FT_GPU(t::AbstractVector{T}, x::AbstractVector{<:Number}, tol::Real=1e-8, indvar::Bool=true) where {T<:Real}
+    N = length(t)
+    @assert length(x) == N "t and x must have the same length"
+    @assert N ≥ 2 "Need at least 2 samples"
+
+    dt = (t[end] - t[1]) / (N - 1)
+    if any(abs.(diff(t) .- dt) .> tol)
+        error("Time series not equally spaced!")
+    end
+
+    ω = FFTW.fftshift(2π .* FFTW.fftfreq(N, dt))          # on CPU
+    x_gpu = CuArray(x)
+    X_gpu = fft(x_gpu)                                     # cuFFT
+    Xs_gpu = FFTW.fftshift(X_gpu)                          # shift after FFT
+    # multiply by dt and origin phase (on GPU), then bring back
+    phase_gpu = exp.(-im .* CuArray(ω) .* t[1])
+    X = Array(Xs_gpu .* dt .* phase_gpu)
+
+    return indvar ? (collect(ω), X) : X
+end
+
+"""
+    iFT(ω, X; tol=1e-8, indvar=true, t0=0.0)
+
+Inverse of `FT`. If you originally used `FT(t,x)` with time origin `t[1]`, call as `iFT(ω, X; t0=t[1])` to recover the original grid.
+Returns `(t, x)` with `t = t0 .+ (0:N-1)*dt`, where `dt = 2π/(N Δω)`.
+"""
+function iFT(ω::AbstractVector{T}, X::AbstractVector{<:Number}, tol::Real=1e-8, indvar::Bool=true; t0::Real=0.0) where {T<:Real}
+    N = length(ω)
+    @assert length(X) == N "ω and X must have the same length"
+    @assert N ≥ 2 "Need at least 2 samples"
+
+    ωu = FFTW.ifftshift(ω)
+    Xu = FFTW.ifftshift(X)
+
+    Δω = ωu[2] - ωu[1]
+    if any(abs.(diff(ωu) .- Δω) .> tol)
+        error("Frequency grid not equally spaced!")
+    end
+
+    dt = 2π / (N * Δω)                              # dual grid spacing
+    # undo origin phase and invert scaling by dt
+    x = (1/dt) .* ifft(Xu .* exp.(im .* ωu .* t0))
+    t = t0 .+ dt .* collect(0:N-1)
+
+    return indvar ? (collect(t), collect(x)) : collect(x)
+end
+
+"""
+    iFT_GPU(ω, X; tol=1e-8, indvar=true, t0=0.0)
+
+GPU version of `iFT`. Returns arrays on the CPU.
+"""
+function iFT_GPU(ω::AbstractVector{T}, X::AbstractVector{<:Number}, tol::Real=1e-8, indvar::Bool=true; t0::Real=0.0) where {T<:Real}
+    N = length(ω)
+    @assert length(X) == N "ω and X must have the same length"
+    @assert N ≥ 2 "Need at least 2 samples"
+
+    ωu = FFTW.ifftshift(ω)
+    Δω = ωu[2] - ωu[1]
+    if any(abs.(diff(ωu) .- Δω) .> tol)
+        error("Frequency grid not equally spaced!")
+    end
+
+    dt = 2π / (N * Δω)
+
+    Xu_gpu = CuArray(FFTW.ifftshift(X))
+    phase_gpu = exp.(im .* CuArray(ωu) .* t0)
+    x_gpu = (1/dt) .* ifft(Xu_gpu .* phase_gpu)           # cuFFT inverse
+    x = Array(x_gpu)
+    t = t0 .+ dt .* collect(0:N-1)
+
+    return indvar ? (collect(t), x) : x
+end
+
+##########################################
+# Correlation / Autocorrelation (linear)
+##########################################
+
+"""
+    Correlation(a[, b=a]; subtract_mean=false)
+
+Linear (non-circular) correlation via FFT with zero padding and
+normalization by the decreasing sample count `(N:-1:1)`.
+If `b==a`, this is the autocorrelation.
+"""
+function Correlation(a::AbstractVector{T}, b::AbstractVector{T}=a; subtract_mean::Bool=false) where {T<:Real}
+    N = length(a)
+    @assert N ≥ 1
+    @assert length(b) == N "a and b must have the same length"
+
+    meana = subtract_mean ? mean(a) : zero(T)
     a2 = pad_to_power_of_two(a, meana)
-    data_a = append!(a2, zeros(length(a2)))
-    fra = fft(data_a)
+    data_a = vcat(a2, zeros(T, length(a2)))               # zero-pad to linearize
+    Fa = fft(data_a)
 
-    if b === nothing
-        sf = conj.(fra) .* fra
+    S = if b === a
+        conj.(Fa) .* Fa
     else
-        meanb = subtract_mean ? mean(b) : 0.0
+        meanb = subtract_mean ? mean(b) : zero(T)
         b2 = pad_to_power_of_two(b, meanb)
-        data_b = append!(b2, zeros(length(b2)))
-        frb = fft(data_b)
-        sf = conj.(fra) .* frb
+        data_b = vcat(b2, zeros(T, length(b2)))
+        Fb = fft(data_b)
+        conj.(Fa) .* Fb
     end
 
-    cor = real(ifft(sf)[1:length(a)]) ./ reverse(1:length(a))
-    return cor #, sf[1:length(a)]
-end
-	
-export pad_to_power_of_two
-	
-function pad_to_power_of_two(x::Vector{T}, subtract_mean_val::T) where T
-    n = length(x)
-    next_power_of_two = 2^ceil(Int, log2(n))
-    padded_length = next_power_of_two - n
-    padded_x = Vector{T}(undef, next_power_of_two)
-    padded_x[1:n] .= x .- subtract_mean_val
-    padded_x[n+1:end] .= zero(T)
-    return padded_x
+    c_full = real(ifft(S))
+    c = @view c_full[1:N]
+    return c ./ collect(N:-1:1)
 end
 
-export correlation_GPU
+"""
+    Correlation_GPU(a[, b=a]; subtract_mean=false)
 
-function correlation_GPU(a::Vector{T}, b::Vector{T} = a; subtract_mean::Bool=false) where T
-    
+GPU version of `Correlation`. Returns result on CPU.
+"""
+function Correlation_GPU(a::AbstractVector{T}, b::AbstractVector{T}=a; subtract_mean::Bool=false) where {T<:Real}
+    N = length(a)
+    @assert N ≥ 1
+    @assert length(b) == N "a and b must have the same length"
 
     meana = subtract_mean ? mean(a) : zero(T)
     a2 = pad_to_power_of_two(a, meana)
     data_a = vcat(a2, zeros(eltype(a2), length(a2)))
-    data_a_gpu = CuVector(data_a)
-    fra = fft(data_a_gpu)
+    Fa = fft(CuArray(data_a))
 
-    if b === nothing
-        sf = conj.(fra) .* fra
+    S_gpu = if b === a
+        conj.(Fa) .* Fa
     else
         meanb = subtract_mean ? mean(b) : zero(T)
         b2 = pad_to_power_of_two(b, meanb)
         data_b = vcat(b2, zeros(eltype(b2), length(b2)))
-        data_b_gpu = CuVector(data_b)
-        frb = fft(data_b_gpu)
-        sf = conj.(fra) .* frb
+        Fb = fft(CuArray(data_b))
+        conj.(Fa) .* Fb
     end
 
-    #cor = real(ifft(sf)[1:length(a_gpu)]) ./ reverse(CuArray(1:length(a_gpu)))
-    isf_gpu = ifft(sf)
-    cor = real(Array(isf_gpu))[1:length(a)] ./ reverse(1:length(a))
-    return Array(cor)  # Move result back to CPU
+    c_full = real(Array(ifft(S_gpu)))
+    c = @view c_full[1:N]
+    return c ./ collect(N:-1:1)
 end
 
+######################
+# MSD (1D time series)
+######################
+
+"""
+    MSD(positions)
+
+Mean-squared displacement computed from autocorrelation:
+`MSD(τ) = 2 (C(0) - C(τ))`, where `C` is the autocorrelation of the position time series.
+"""
+function MSD(positions::AbstractVector{T}) where {T<:Real}
+    c = Correlation(positions)
+    return 2 .* (c[1] .- c)
+end
+
+"""
+    MSD_GPU(positions)
+
+GPU-backed autocorrelation; returns MSD on CPU.
+"""
+function MSD_GPU(positions::AbstractVector{T}) where {T<:Real}
+    c = Correlation_GPU(positions)
+    return 2 .* (c[1] .- c)
+end
+
+########################################
+# Lowercase wrappers (back-compat names)
+########################################
+
+# Keep your original exported lowercase names as thin wrappers.
+
+function correlation(a::AbstractVector{T}, b::AbstractVector{T}=a; subtract_mean::Bool=false) where {T<:Real}
+    return Correlation(a, b; subtract_mean=subtract_mean)
+end
+
+function correlation_GPU(a::AbstractVector{T}, b::AbstractVector{T}=a; subtract_mean::Bool=false) where {T<:Real}
+    return Correlation_GPU(a, b; subtract_mean=subtract_mean)
+end
