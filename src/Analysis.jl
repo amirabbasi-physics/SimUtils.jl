@@ -18,13 +18,14 @@ export pad_to_power_of_two
 ########################
 
 # Pad to next power of two (≥ length(x)); subtract mean if provided
-function pad_to_power_of_two(x::AbstractVector{T}, meanval::T) where {T}
+function pad_to_power_of_two(x::AbstractVector{T}, meanval::Number) where {T}
     n = length(x)
     m = nextpow(2, n)                   # smallest power of 2 ≥ n
-    y = Vector{T}(undef, m)
+    S = promote_type(T, typeof(meanval))
+    y = Vector{S}(undef, m)
     @inbounds begin
         @views y[1:n] .= x .- meanval
-        @views y[n+1:m] .= zero(T)
+        @views y[n+1:m] .= zero(S)
     end
     return y
 end
@@ -66,7 +67,7 @@ function FT(t::AbstractVector{T}, x::AbstractVector{<:Number}, tol::Real=1e-8, i
         error("Time series not equally spaced!")
     end
 
-    ω = FFTW.fftshift(2π .* FFTW.fftfreq(N, dt))          # angular frequencies
+    ω = FFTW.fftshift(2π .* FFTW.fftfreq(N, inv(dt)))     # angular frequencies
     X = FFTW.fftshift(fft(x)) .* dt .* exp.(-im .* ω .* t[1])  # dt scaling + origin phase
 
     return indvar ? (collect(ω), collect(X)) : collect(X)
@@ -87,7 +88,7 @@ function FT_GPU(t::AbstractVector{T}, x::AbstractVector{<:Number}, tol::Real=1e-
         error("Time series not equally spaced!")
     end
 
-    ω = FFTW.fftshift(2π .* FFTW.fftfreq(N, dt))          # on CPU
+    ω = FFTW.fftshift(2π .* FFTW.fftfreq(N, inv(dt)))     # on CPU
     x_gpu = CuArray(x)
     X_gpu = fft(x_gpu)                                     # cuFFT
     Xs_gpu = FFTW.fftshift(X_gpu)                          # shift after FFT
@@ -109,13 +110,13 @@ function iFT(ω::AbstractVector{T}, X::AbstractVector{<:Number}, tol::Real=1e-8,
     @assert length(X) == N "ω and X must have the same length"
     @assert N ≥ 2 "Need at least 2 samples"
 
-    ωu = FFTW.ifftshift(ω)
-    Xu = FFTW.ifftshift(X)
-
-    Δω = ωu[2] - ωu[1]
-    if any(abs.(diff(ωu) .- Δω) .> tol)
+    Δω = ω[2] - ω[1]
+    if any(abs.(diff(ω) .- Δω) .> tol)
         error("Frequency grid not equally spaced!")
     end
+
+    ωu = FFTW.ifftshift(ω)
+    Xu = FFTW.ifftshift(X)
 
     dt = 2π / (N * Δω)                              # dual grid spacing
     # undo origin phase and invert scaling by dt
@@ -135,11 +136,12 @@ function iFT_GPU(ω::AbstractVector{T}, X::AbstractVector{<:Number}, tol::Real=1
     @assert length(X) == N "ω and X must have the same length"
     @assert N ≥ 2 "Need at least 2 samples"
 
-    ωu = FFTW.ifftshift(ω)
-    Δω = ωu[2] - ωu[1]
-    if any(abs.(diff(ωu) .- Δω) .> tol)
+    Δω = ω[2] - ω[1]
+    if any(abs.(diff(ω) .- Δω) .> tol)
         error("Frequency grid not equally spaced!")
     end
+
+    ωu = FFTW.ifftshift(ω)
 
     dt = 2π / (N * Δω)
 
@@ -229,8 +231,23 @@ Mean-squared displacement computed from autocorrelation:
 `MSD(τ) = 2 (C(0) - C(τ))`, where `C` is the autocorrelation of the position time series.
 """
 function MSD(positions::AbstractVector{T}) where {T<:Real}
+    N = length(positions)
+    @assert N ≥ 1
+
     c = Correlation(positions)
-    return 2 .* (c[1] .- c)
+    squares = abs2.(positions)
+    prefix = cumsum(squares)
+    total = prefix[end]
+
+    msd = similar(c)
+    @inbounds for lag in 0:(N - 1)
+        count = N - lag
+        sum_head = prefix[count]
+        sum_tail = lag == 0 ? total : total - prefix[lag]
+        msd[lag + 1] = (sum_head + sum_tail) / count - 2 * c[lag + 1]
+    end
+
+    return msd
 end
 
 """
@@ -239,8 +256,23 @@ end
 GPU-backed autocorrelation; returns MSD on CPU.
 """
 function MSD_GPU(positions::AbstractVector{T}) where {T<:Real}
+    N = length(positions)
+    @assert N ≥ 1
+
     c = Correlation_GPU(positions)
-    return 2 .* (c[1] .- c)
+    squares = abs2.(positions)
+    prefix = cumsum(squares)
+    total = prefix[end]
+
+    msd = similar(c)
+    @inbounds for lag in 0:(N - 1)
+        count = N - lag
+        sum_head = prefix[count]
+        sum_tail = lag == 0 ? total : total - prefix[lag]
+        msd[lag + 1] = (sum_head + sum_tail) / count - 2 * c[lag + 1]
+    end
+
+    return msd
 end
 
 ########################################
