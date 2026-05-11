@@ -1,25 +1,17 @@
-name = "MyUtilities"
-uuid = "6510ae6a-d2c5-41ab-bd9f-56601e1ee226"
-authors = ["abbaa90 <abbaa90@fu-berlin.de> and contributors"]
-version = "1.0.0-DEV"
+name = "SimUtils"
+uuid = "5774857c-11f2-40eb-94e0-3e7ef8bf9483"
+authors = ["Amir Abbasi <abbaa90@fu-berlin.de> and contributors"]
+version = "0.1.0"
 
 [deps]
-CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
-DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
-Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
 FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
-LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
-Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
-PyCall = "438e738f-606a-5dbb-bf0a-cddfbfd45ab0"
-PyPlot = "d330b81b-6aea-500a-939a-2ce795aea3ee"
-Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
-StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
-Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]
-julia = "1.6.7"
+CUDA = "5, 6"
+FFTW = "1"
+julia = "1.10"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"

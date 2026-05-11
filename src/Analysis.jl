@@ -3,6 +3,7 @@
 ###############
 using FFTW
 using CUDA
+using Statistics
 
 ################
 # Public exports
@@ -17,7 +18,15 @@ export pad_to_power_of_two
 # Utility / helper stuff
 ########################
 
-# Pad to next power of two (≥ length(x)); subtract mean if provided
+"""
+    pad_to_power_of_two(x, meanval)
+
+Return a copy of `x` zero-padded to the next power-of-two length after first
+subtracting `meanval` from the populated portion.
+
+This helper is used internally to make FFT-based correlation routines more
+efficient while keeping the linear-correlation normalization explicit.
+"""
 function pad_to_power_of_two(x::AbstractVector{T}, meanval::Number) where {T}
     n = length(x)
     m = nextpow(2, n)                   # smallest power of 2 ≥ n
@@ -30,16 +39,28 @@ function pad_to_power_of_two(x::AbstractVector{T}, meanval::Number) where {T}
     return y
 end
 
-# Hann-like half-window on [taper_start, taper_end]
+"""
+    apply_taper!(data, taper_start, taper_end)
+
+Apply a rising half-Hann taper in place on the inclusive index interval
+`[taper_start, taper_end]`.
+"""
 function apply_taper!(data, taper_start::Integer, taper_end::Integer)
+    taper_end > taper_start || throw(ArgumentError("taper_end must be greater than taper_start."))
     @inbounds for i in taper_start:taper_end
         data[i] *= 0.5 * (1 - cos(π * (i - taper_start) / (taper_end - taper_start)))
     end
     return nothing
 end
 
-# Cosine half-window variant
+"""
+    apply_taper2!(data, taper_start, taper_end)
+
+Apply a cosine half-window variant in place on the inclusive index interval
+`[taper_start, taper_end]`.
+"""
 function apply_taper2!(data, taper_start::Integer, taper_end::Integer)
+    taper_end > taper_start || throw(ArgumentError("taper_end must be greater than taper_start."))
     @inbounds for i in taper_start:taper_end
         data[i] *= cos(π * (i - taper_start) / (2 * (taper_end - taper_start)))
     end
@@ -279,12 +300,20 @@ end
 # Lowercase wrappers (back-compat names)
 ########################################
 
-# Keep your original exported lowercase names as thin wrappers.
+"""
+    correlation(a[, b=a]; subtract_mean=false)
 
+Lowercase alias for [`Correlation`](@ref).
+"""
 function correlation(a::AbstractVector{T}, b::AbstractVector{T}=a; subtract_mean::Bool=false) where {T<:Real}
     return Correlation(a, b; subtract_mean=subtract_mean)
 end
 
+"""
+    correlation_GPU(a[, b=a]; subtract_mean=false)
+
+Lowercase alias for [`Correlation_GPU`](@ref).
+"""
 function correlation_GPU(a::AbstractVector{T}, b::AbstractVector{T}=a; subtract_mean::Bool=false) where {T<:Real}
     return Correlation_GPU(a, b; subtract_mean=subtract_mean)
 end

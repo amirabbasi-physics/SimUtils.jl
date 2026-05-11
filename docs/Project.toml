@@ -1,0 +1,6 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+SimUtils = "5774857c-11f2-40eb-94e0-3e7ef8bf9483"
+
+[compat]
+Documenter = "1"
