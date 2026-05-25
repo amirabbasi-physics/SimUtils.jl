@@ -14,9 +14,9 @@ export apply_taper!, apply_taper2!
 export correlation, correlation_GPU
 export pad_to_power_of_two
 
-########################
-# Utility / helper stuff
-########################
+##########################
+# Utility / helper tools #
+##########################
 
 """
     pad_to_power_of_two(x, meanval)
