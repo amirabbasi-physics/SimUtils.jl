@@ -98,6 +98,20 @@ be published to:
 
 `https://amirabbasi-physics.github.io/SimUtils.jl/`
 
+## Running tests
+
+From the root of the SimUtils.jl repository, run:
+
+```bash
+julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.test()'
+```
+
+This installs the required dependencies and runs the package's test suite.
+
+GPU tests run only when `CUDA.functional()` returns `true`. Otherwise,
+they are skipped. A passing test run without a working CUDA GPU therefore
+does not verify the GPU implementations.
+
 ## License
 
 This project is distributed under the terms of the license in [LICENSE](LICENSE).
