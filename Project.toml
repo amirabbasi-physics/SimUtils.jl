@@ -1,7 +1,7 @@
 name = "SimUtils"
 uuid = "5774857c-11f2-40eb-94e0-3e7ef8bf9483"
 authors = ["Amir Abbasi <abbaa90@fu-berlin.de> and contributors"]
-version = "0.1.0"
+version = "0.1.1"
 
 [deps]
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
